@@ -1,0 +1,21 @@
+{
+  "order": {
+    "initial_status": "processing",
+    "order_id": "ORD-4523"
+  },
+  "outcome_after_request": [
+    {
+      "cause": "order_service",
+      "offset": 4,
+      "status": "cancelled"
+    }
+  ],
+  "scenario_id": "ORD-4523",
+  "ticket": {
+    "amount_cents": 13250,
+    "customer_ref": "C-2240",
+    "order_id": "ORD-4523",
+    "request": "Please cancel my order and refund me.",
+    "ticket_id": "SUP-3303"
+  }
+}

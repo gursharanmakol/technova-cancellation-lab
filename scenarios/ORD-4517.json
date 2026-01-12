@@ -1,0 +1,26 @@
+{
+  "order": {
+    "initial_status": "processing",
+    "order_id": "ORD-4517"
+  },
+  "outcome_after_request": [
+    {
+      "cause": "warehouse",
+      "offset": 3,
+      "status": "cancel_rejected"
+    },
+    {
+      "cause": "warehouse",
+      "offset": 4,
+      "status": "shipped"
+    }
+  ],
+  "scenario_id": "ORD-4517",
+  "ticket": {
+    "amount_cents": 8900,
+    "customer_ref": "C-2231",
+    "order_id": "ORD-4517",
+    "request": "Please cancel my order and refund me.",
+    "ticket_id": "SUP-3301"
+  }
+}

@@ -1,0 +1,7 @@
+.git/
+runs/
+evidence/
+bundle_full.txt
+__pycache__/
+.venv/
+.pytest_cache/
