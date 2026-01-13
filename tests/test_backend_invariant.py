@@ -93,6 +93,15 @@ def test_refund_accepted_once_only_when_status_is_cancelled():
 
 def test_refund_uses_order_service_status_at_the_current_tick():
     parts = stack("ORD-4517")
+    parts["cache"].put(
+        "ORD-4517",
+        {
+            "status": "cancelled",
+            "basis": "requested",
+            "written_at": 1,
+            "request_id": "CR-4517-1",
+        },
+    )
     response = parts["payments"].issue_refund("ORD-4517", 8900)
     assert response == {
         "status": "rejected",

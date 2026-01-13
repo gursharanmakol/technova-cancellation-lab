@@ -4,6 +4,7 @@ from collections.abc import Callable
 
 from orderdesk.clock import Clock, EngineError
 from orderdesk.messages import Messages
+from orderdesk.order_cache import OrderCache
 from orderdesk.order_client import OrderClient
 from orderdesk.payments import Payments
 from orderdesk.trace import Trace
@@ -47,6 +48,7 @@ class Controller:
         messages: Messages,
         trace: Trace,
         scenario: dict,
+        cache: OrderCache,
         read_status: Callable[[str], str | None],
     ) -> None:
         self._clock = clock
@@ -55,11 +57,12 @@ class Controller:
         self._messages = messages
         self._trace = trace
         self._scenario = scenario
+        self._cache = cache
         self._read_status = read_status
 
     def cache_snapshot(self) -> dict | None:
         """Copy of this order's cache record, for display. None when it is empty."""
-        return None
+        return self._cache.get(self._scenario["scenario_id"])
 
     def run(self) -> None:
         order_id = self._scenario["scenario_id"]

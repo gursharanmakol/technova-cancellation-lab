@@ -7,6 +7,7 @@ def test_status_and_client_reads_leave_history_and_clock_unchanged():
     parts["client"].cancel("ORD-4517")
     history = parts["orders"].history("ORD-4517")
     tick = parts["clock"].now
+    cache_before_service_read = parts["cache"].get("ORD-4517")
     arm(parts["trace"], 1)
     expected = {
         1: "processing",
@@ -22,7 +23,9 @@ def test_status_and_client_reads_leave_history_and_clock_unchanged():
         parts["orders"].history("ORD-4517")
     assert parts["clock"].now == tick
     assert parts["orders"].history("ORD-4517") == history
+    assert parts["cache"].get("ORD-4517") == cache_before_service_read
     assert parts["client"].service_status("ORD-4517") == "cancel_requested"
+    assert parts["client"].cached_status("ORD-4517") == "cancel_requested"
     parts["orders"].status_at(2)
     parts["orders"].status_at(6)
     assert parts["clock"].now == tick
@@ -41,6 +44,7 @@ def test_repeated_mixed_reads_do_not_apply_later_outcomes():
     for _ in range(7):
         parts["orders"].status_at(6)
         parts["client"].service_status("ORD-4523")
+        parts["client"].cached_status("ORD-4523")
     assert parts["clock"].now == 2
     assert parts["orders"].status_at(6) == "cancel_requested"
     assert len(parts["orders"].history("ORD-4523")) == 2

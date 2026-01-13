@@ -1,7 +1,8 @@
-"""Build the order client and the controller for one run."""
+"""Build the cache, the order client, and the controller for one run."""
 
 from orderdesk.clock import Clock
 from orderdesk.messages import Messages
+from orderdesk.order_cache import OrderCache
 from orderdesk.order_client import OrderClient
 from orderdesk.order_service import OrderService
 from orderdesk.payments import Payments
@@ -17,8 +18,9 @@ def build(
     trace: Trace,
     scenario: dict,
 ) -> Controller:
-    client = OrderClient(orders, trace, clock)
+    cache = OrderCache()
+    client = OrderClient(orders, cache, trace, clock)
     read_status = client.service_status
     return Controller(
-        clock, client, payments, messages, trace, scenario, read_status
+        clock, client, payments, messages, trace, scenario, cache, read_status
     )

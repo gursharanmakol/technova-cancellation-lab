@@ -4,6 +4,7 @@ from pathlib import Path
 
 from orderdesk.clock import Clock
 from orderdesk.messages import Messages
+from orderdesk.order_cache import OrderCache
 from orderdesk.order_client import OrderClient
 from orderdesk.order_service import OrderService
 from orderdesk.payments import Payments
@@ -40,13 +41,15 @@ def accept_cancel_at_tick_two(order_id: str):
 
 def stack(order_id: str) -> dict:
     loaded, clock, orders = load_order(order_id)
+    cache = OrderCache()
     trace = Trace(clock)
     return {
         "scenario": loaded,
         "clock": clock,
         "orders": orders,
+        "cache": cache,
         "trace": trace,
-        "client": OrderClient(orders, trace, clock),
+        "client": OrderClient(orders, cache, trace, clock),
         "payments": Payments(orders, clock),
         "messages": Messages(clock),
         "order_id": order_id,
