@@ -20,7 +20,7 @@ def build(
 ) -> Controller:
     cache = OrderCache()
     client = OrderClient(orders, cache, trace, clock)
-    read_status = client.service_status
+    read_status = client.cached_status
     return Controller(
         clock, client, payments, messages, trace, scenario, cache, read_status
     )

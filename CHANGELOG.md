@@ -7,3 +7,7 @@ Support workflow.
 ## 1.1
 
 Order client cache to avoid duplicate cancel requests.
+
+## 1.2
+
+Faster status reads.
