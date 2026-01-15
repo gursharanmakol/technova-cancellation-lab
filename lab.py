@@ -1,41 +1,40 @@
-"""Command line: run, trace, show, and world."""
+"""Command line: run, trace, show, world, and verify."""
 
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
 
 def _load_runtime() -> None:
-    """Import the modules the run commands use."""
-    global EngineError, load_scenario, load_scenarios, canonical_json
+    """Import the lab modules after the bundle command has had its chance.
+
+    bundle must still run when a protected file is a symbolic link, so it
+    does not load the rest of the package.
+    """
+    global status_at, EngineError, load_scenario, load_scenarios, canonical_json
+    from orderdesk.acceptance import status_at as status_at_fn
     from orderdesk.clock import EngineError as engine_error
     from orderdesk.scenarios import load_scenario as load_one
     from orderdesk.scenarios import load_scenarios as load_all
     from orderdesk.trace import canonical_json as canon
 
+    status_at = status_at_fn
     EngineError = engine_error
     load_scenario = load_one
     load_scenarios = load_all
     canonical_json = canon
 
-
-def status_at(history: list[dict], tick: int) -> str:
-    """Status after every recorded change at or before tick."""
-    chosen = None
-    for entry in history:
-        if entry["tick"] <= tick:
-            chosen = entry
-        else:
-            break
-    if chosen is None:
-        raise ValueError(f"no status at tick {tick}")
-    return chosen["status"]
-
 ROOT = Path(__file__).resolve().parent
 SCENARIOS = ROOT / "scenarios"
 RUNS = ROOT / "runs"
+VERIFY_TIMEOUT_SECONDS = 40
+
+PYTEST_TIMEOUT_SECONDS = 60
+GIT_TIMEOUT_SECONDS = 15
 
 
 def emit(text: str) -> None:
@@ -302,8 +301,59 @@ def cmd_world(args: list[str]) -> int:
     return 0
 
 
+def cmd_verify(args: list[str]) -> int:
+    if len(args) > 1:
+        emit("Usage: python lab.py verify [order or all]")
+        return 2
+    if not args or args[0] == "all":
+        order_ids = scenario_ids()
+    else:
+        order_id = resolve_one(args[0])
+        if order_id is None:
+            return unknown_order(args[0])
+        order_ids = [order_id]
+    code, stdout, stderr, timed_out = _run_captured(
+        [sys.executable, str(ROOT / "lab.py"), "--verify-worker", *order_ids],
+        ROOT,
+        VERIFY_TIMEOUT_SECONDS,
+    )
+    if timed_out:
+        _write_presented(_timed_out_text())
+        return 1
+    _write_presented(stdout)
+    if code == 0:
+        return 0
+    if stdout.startswith(b"ERROR:") or stdout.startswith(b"V"):
+        return 1
+    first = _first_bytes(stderr or stdout)
+    emit(f"ERROR: could not run scenarios: {first}")
+    return 1
 
 
+def verify_worker(order_ids: list[str]) -> int:
+    try:
+        from orderdesk.acceptance import backend_tests_pass, evaluate, format_report
+        from orderdesk.engine import run
+    except Exception as exc:
+        emit(f"ERROR: could not run scenarios: {_first_line(exc)}")
+        return 1
+    runs = {}
+    failed: list[tuple[str, int | None]] = []
+    for order_id in order_ids:
+        try:
+            runs[order_id] = run(load_scenario(SCENARIOS / f"{order_id}.json"))
+        except EngineError as exc:
+            failed.append((order_id, _tick_from_error(exc)))
+        except Exception as exc:
+            emit(f"ERROR: could not run scenarios: {_first_line(exc)}")
+            return 1
+    checks = evaluate(runs, failed=failed, v5_passed=backend_tests_pass(ROOT))
+    report = format_report(checks)
+    sys.stdout.buffer.write(report.encode("ascii"))
+    integrity_ok = "\nIntegrity: PASS\n" in report
+    if failed or not integrity_ok or not all(check.passed for check in checks):
+        return 1
+    return 0
 
 
 def _world_text(world: dict) -> str:
@@ -504,32 +554,158 @@ def _first_line(exc: BaseException) -> str:
     return text.splitlines()[0]
 
 
+def _first_bytes(payload: bytes) -> str:
+    text = payload.decode("ascii", "replace").strip()
+    if not text:
+        return "could not run scenarios"
+    return text.splitlines()[0]
 
 
+def _tick_from_error(exc: EngineError) -> int | None:
+    numbers = [int(part) for part in str(exc).replace(".", " ").split() if part.isdigit()]
+    if not numbers:
+        return None
+    return numbers[-1]
 
 
+def cmd_check(args: list[str]) -> int:
+    if args:
+        emit("Usage: python lab.py check")
+        return 2
+    problems = []
+    if sys.version_info < (3, 12):
+        problems.append("Python 3.12 or newer is required.")
+    try:
+        import pytest  # noqa: F401
+    except ImportError:
+        problems.append("pytest is not importable.")
+    try:
+        ids = scenario_ids()
+        if ids != ["ORD-4517", "ORD-4520", "ORD-4523"]:
+            problems.append("scenarios did not load.")
+    except Exception as exc:
+        problems.append(f"scenarios did not load: {_first_line(exc)}")
+        ids = []
+    if not problems and ids:
+        try:
+            from orderdesk.engine import run
+
+            run(load_scenario(SCENARIOS / f"{ids[0]}.json"))
+        except Exception as exc:
+            problems.append(f"engine run did not complete: {_first_line(exc)}")
+    if shutil_which("git") is None:
+        emit("git: not found (warning)")
+    else:
+        emit("git: present")
+    from orderdesk.acceptance import integrity_status
+
+    _ok, line = integrity_status(ROOT)
+    if _ok:
+        emit(line)
+    else:
+        emit(line + " (warning)")
+    if problems:
+        for problem in problems:
+            emit(_paint(problem, failed=True))
+        return 1
+    emit(_paint("Ready. Next: python lab.py run ORD-4517", failed=False))
+    return 0
 
 
+def cmd_test(args: list[str]) -> int:
+    if args:
+        emit("Usage: python lab.py test")
+        return 2
+    completed = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "tests"],
+        cwd=ROOT,
+        check=False,
+    )
+    return completed.returncode
 
 
+def cmd_bundle(args: list[str]) -> int:
+    if args:
+        emit("Usage: python lab.py bundle")
+        return 2
+    try:
+        from orderdesk.bundle import build_bundle
+
+        sys.stdout.buffer.write(build_bundle(ROOT))
+    except Exception as exc:
+        emit(f"bundle failed: {_first_line(exc)}")
+    return 0
 
 
+def shutil_which(name: str) -> str | None:
+    return __import__("shutil").which(name)
 
 
+def _run_captured(args: list[str], cwd: Path, timeout: float) -> tuple[int, bytes, bytes, bool]:
+    proc = subprocess.Popen(
+        args,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_tree(proc.pid)
+        try:
+            proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()
+        return proc.returncode or 1, b"", b"", True
+    return proc.returncode or 0, stdout or b"", stderr or b"", False
 
 
+def _kill_tree(pid: int) -> None:
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(pid)],
+            capture_output=True,
+            check=False,
+        )
+        return
+    try:
+        os.kill(pid, 15)
+    except OSError:
+        return
 
 
+def _timed_out_text() -> bytes:
+    from orderdesk.acceptance import integrity_status
+
+    _ok, line = integrity_status(ROOT)
+    text = (
+        "timed out\n"
+        "V1 FAIL\n"
+        "V2 FAIL\n"
+        "V3 FAIL\n"
+        "V4 FAIL\n"
+        "V5 FAIL\n"
+        f"{line}\n"
+        "Result: FAIL\n"
+    )
+    return text.encode("ascii")
 
 
 def main(argv: list[str]) -> int:
+    if argv and argv[0] == "bundle":
+        return cmd_bundle(argv[1:])
     _load_runtime()
+    if argv and argv[0] == "--verify-worker":
+        return verify_worker(argv[1:])
     if not argv:
         emit("Usage: python lab.py <command>")
-        emit("Commands: run, trace, show, world")
+        emit("Commands: check, run, trace, show, world, test, verify, bundle")
         return 2
     command, args = argv[0], argv[1:]
-    if command == "run":
+    if command == "check":
+        code = cmd_check(args)
+    elif command == "run":
         code = cmd_run(args)
     elif command == "trace":
         code = cmd_trace(args)
@@ -537,9 +713,15 @@ def main(argv: list[str]) -> int:
         code = cmd_show(args)
     elif command == "world":
         code = cmd_world(args)
+    elif command == "verify":
+        code = cmd_verify(args)
+    elif command == "test":
+        return cmd_test(args)
+    elif command == "bundle":
+        return cmd_bundle(args)
     else:
         emit("Usage: python lab.py <command>")
-        emit("Commands: run, trace, show, world")
+        emit("Commands: check, run, trace, show, world, test, verify, bundle")
         return 2
     _finish()
     return code
